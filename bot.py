@@ -5,12 +5,18 @@ from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Accept-Language": "en-US,en;q=0.9,tr;q=0.8,ar;q=0.7",
 }
+
+def get_html(url):
+    r = requests.get(url, headers=HEADERS, timeout=25)
+    r.raise_for_status()
+    return r.text
 
 def extract_ref(text):
     match = re.search(r'_(\d{8})|\b(\d{8})\b', text)
@@ -18,50 +24,25 @@ def extract_ref(text):
         return match.group(1) or match.group(2)
     return None
 
-def get_html(url):
-    r = requests.get(url, headers=HEADERS, timeout=25)
-    r.raise_for_status()
-    return r.text
-
-def parse_number(raw):
-    raw = raw.strip()
-    raw = raw.replace("\xa0", " ")
-    raw = raw.replace(",", "").replace(" ", "")
+def parse_price(raw):
+    raw = raw.replace(",", "").replace(".", "").strip()
     try:
-        return int(float(raw))
-    except:
-        return None
-
-def parse_price_float(raw):
-    raw = raw.strip()
-    raw = raw.replace("\xa0", " ")
-    raw = raw.replace("TL", "").replace("₺", "").strip()
-
-    # إذا الرقم مثل 1.999,99
-    if "," in raw and "." in raw:
-        raw = raw.replace(".", "").replace(",", ".")
-    else:
-        raw = raw.replace(",", ".")
-
-    try:
-        return float(raw)
+        return int(raw)
     except:
         return None
 
 def extract_turkey_price(html):
     patterns = [
-        r'"salePrice"\s*:\s*"?(\\d+[\\.,]?\\d*)"?',
-        r'"price"\s*:\s*"?(\\d+[\\.,]?\\d*)"?',
         r'(\d[\d\.,]{1,})\s*TL',
-        r'(\d[\d\.,]{1,})\s*₺',
+        r'(\d[\d\.,]{1,})\s*₺'
     ]
 
     for pattern in patterns:
         matches = re.findall(pattern, html, re.IGNORECASE)
         for m in matches:
-            price = parse_price_float(m)
-            if price and price > 0:
-                return price
+            val = parse_price(m)
+            if val:
+                return val
 
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
@@ -69,24 +50,24 @@ def extract_turkey_price(html):
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
-            price = parse_price_float(m)
-            if price and price > 0:
-                return price
+            val = parse_price(m)
+            if val:
+                return val
 
     return None
 
 def extract_iqd_price(html):
     patterns = [
         r'(\d[\d,\.]{1,})\s*IQD',
-        r'IQD\s*(\d[\d,\.]{1,})',
+        r'IQD\s*(\d[\d,\.]{1,})'
     ]
 
     for pattern in patterns:
         matches = re.findall(pattern, html, re.IGNORECASE)
         for m in matches:
-            value = parse_number(m.replace(".", "").replace(",", ""))
-            if value and value > 0:
-                return value
+            val = parse_price(m)
+            if val:
+                return val
 
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
@@ -94,57 +75,36 @@ def extract_iqd_price(html):
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
-            value = parse_number(m.replace(".", "").replace(",", ""))
-            if value and value > 0:
-                return value
+            val = parse_price(m)
+            if val:
+                return val
 
     return None
 
-def find_iraq_price(ref_code):
-    # 1) محاولة البحث داخل مانكو العراق مباشرة
-    search_urls = [
-        f"https://shop.mango.com/iq/en/search/{ref_code}",
-        f"https://shop.mango.com/iq/en/search?q={ref_code}",
-    ]
+def find_iraq_price(ref):
+    params = {
+        "engine": "google",
+        "q": f"site:shop.mango.com/iq/en {ref}",
+        "api_key": SERPAPI_KEY
+    }
 
-    for url in search_urls:
-        try:
-            html = get_html(url)
-            price = extract_iqd_price(html)
-            if price:
-                return price
-        except:
-            pass
-
-    # 2) محاولة البحث عبر DuckDuckGo HTML عن صفحة Mango Iraq
     try:
-        ddg_url = "https://html.duckduckgo.com/html/"
-        params = {"q": f"site:shop.mango.com/iq/en {ref_code} Mango"}
-        r = requests.get(ddg_url, params=params, headers=HEADERS, timeout=25)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "lxml")
+        r = requests.get("https://serpapi.com/search", params=params)
+        data = r.json()
 
-        links = []
-        for a in soup.select("a[href]"):
-            href = a.get("href", "")
-            if "shop.mango.com/iq/en" in href:
-                links.append(href)
+        results = data.get("organic_results", [])
 
-        seen = set()
-        clean_links = []
-        for link in links:
-            if link not in seen:
-                seen.add(link)
-                clean_links.append(link)
+        for res in results:
+            link = res.get("link")
 
-        for link in clean_links[:5]:
-            try:
-                html = get_html(link)
-                price = extract_iqd_price(html)
-                if price:
-                    return price
-            except:
-                pass
+            if "shop.mango.com/iq" in link:
+                try:
+                    html = get_html(link)
+                    price = extract_iqd_price(html)
+                    if price:
+                        return price
+                except:
+                    pass
     except:
         pass
 
@@ -170,8 +130,9 @@ def round_sale_price(raw_price):
     else:
         return raw_price + (1000 - remainder)
 
-def calculate_quote(price_try, iraq_price):
+def calculate(price_try, iraq_price):
     cost_iqd = turkey_to_iqd(price_try)
+
     diff = iraq_price - cost_iqd
 
     if diff <= 0:
@@ -179,103 +140,83 @@ def calculate_quote(price_try, iraq_price):
         total_load = sale_price - cost_iqd
     else:
         base_load = flexible_base_load(diff)
-        raw_sale_price = cost_iqd + base_load
-        sale_price = round_sale_price(raw_sale_price)
+        raw_sale = cost_iqd + base_load
+        sale_price = round_sale_price(raw_sale)
         total_load = sale_price - cost_iqd
 
-    return {
-        "cost_iqd": cost_iqd,
-        "iraq_price": iraq_price,
-        "diff": diff,
-        "total_load": total_load,
-        "sale_price": sale_price
-    }
-
-def get_ref_and_turkey_price_from_url(url):
-    html = get_html(url)
-
-    ref_code = extract_ref(url)
-    if not ref_code:
-        ref_code = extract_ref(html)
-
-    price_try = extract_turkey_price(html)
-
-    return ref_code, price_try
+    return cost_iqd, diff, total_load, sale_price
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "بوت تسعيرة مانكو\n\n"
         "استخدم:\n"
-        "/check رابط_تركيا\n\n"
-        "مثال:\n"
-        "/check https://shop.mango.com/tr/tr/p/..."
+        "/check رابط المنتج التركي"
     )
 
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("pong")
-
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if not context.args:
-        await update.message.reply_text("ارسل رابط المنتج التركي بعد /check")
+        await update.message.reply_text("ارسل رابط Mango تركيا بعد /check")
         return
 
-    url = " ".join(context.args).strip()
-
-    if not url.startswith("http"):
-        await update.message.reply_text("ارسل رابط Mango تركيا كامل")
-        return
+    url = context.args[0]
 
     await update.message.reply_text("جاري الفحص...")
 
     try:
-        ref_code, turkey_price = get_ref_and_turkey_price_from_url(url)
 
-        if not ref_code:
-            await update.message.reply_text("لم استطع استخراج الريفيرانس من الرابط")
+        html = get_html(url)
+
+        ref = extract_ref(url)
+        if not ref:
+            ref = extract_ref(html)
+
+        if not ref:
+            await update.message.reply_text("لم استطع استخراج الريفيرانس")
             return
+
+        turkey_price = extract_turkey_price(html)
 
         if not turkey_price:
-            await update.message.reply_text(
-                f"الريفيرانس: {ref_code}\n"
-                "استخرجت الريفيرانس لكن لم استطع جلب سعر تركيا"
-            )
+            await update.message.reply_text("لم استطع جلب سعر تركيا")
             return
 
-        iraq_price = find_iraq_price(ref_code)
+        iraq_price = find_iraq_price(ref)
 
         if not iraq_price:
             cost_iqd = turkey_to_iqd(turkey_price)
+
             await update.message.reply_text(
-                f"الريفيرانس: {ref_code}\n\n"
-                f"سعر تركيا: {int(turkey_price)} ليرة\n"
+                f"الريفيرانس: {ref}\n\n"
+                f"سعر تركيا: {turkey_price} ليرة\n"
                 f"التكلفة بالعراقي: {cost_iqd}\n\n"
                 "لم استطع جلب سعر العراق حالياً"
             )
             return
 
-        result = calculate_quote(turkey_price, iraq_price)
+        cost_iqd, diff, load, sale = calculate(turkey_price, iraq_price)
 
         await update.message.reply_text(
-            f"الريفيرانس: {ref_code}\n\n"
-            f"سعر تركيا: {int(turkey_price)} ليرة\n"
-            f"التكلفة بالعراقي: {result['cost_iqd']}\n\n"
-            f"سعر العراق: {result['iraq_price']}\n"
-            f"الفرق: {result['diff']}\n\n"
-            f"إجمالي التحميل: {result['total_load']}\n"
-            f"سعر البيع: {result['sale_price']}"
+            f"الريفيرانس: {ref}\n\n"
+            f"سعر تركيا: {turkey_price} ليرة\n"
+            f"التكلفة بالعراقي: {cost_iqd}\n\n"
+            f"سعر العراق: {iraq_price}\n"
+            f"الفرق: {diff}\n\n"
+            f"إجمالي التحميل: {load}\n"
+            f"سعر البيع: {sale}"
         )
 
     except Exception as e:
-        await update.message.reply_text(f"صار خطأ أثناء الفحص:\n{str(e)}")
+        await update.message.reply_text(f"خطأ:\n{str(e)}")
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("check", check))
 
-    print("Bot started...")
+    print("Bot started")
+
     app.run_polling()
 
 main()
