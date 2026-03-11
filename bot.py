@@ -1,9 +1,16 @@
 import os
 import re
+import requests
+from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.environ.get("BOT_TOKEN")
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Language": "en-US,en;q=0.9,tr;q=0.8,ar;q=0.7",
+}
 
 def extract_ref(text):
     match = re.search(r'_(\d{8})|\b(\d{8})\b', text)
@@ -52,14 +59,67 @@ def calculate_quote(price_try, iraq_price):
         "sale_price": sale_price
     }
 
+def get_html(url):
+    response = requests.get(url, headers=HEADERS, timeout=25)
+    response.raise_for_status()
+    return response.text
+
+def parse_iqd_value(raw):
+    raw = raw.strip()
+    raw = raw.replace(",", "").replace(".", "")
+    try:
+        return int(raw)
+    except:
+        return None
+
+def search_iraq_price_by_ref(ref_code):
+    search_urls = [
+        f"https://shop.mango.com/iq/en/search/{ref_code}",
+        f"https://shop.mango.com/iq/en/search?q={ref_code}",
+    ]
+
+    patterns = [
+        r'(\d[\d,\.]{2,})\s*IQD',
+        r'IQD\s*(\d[\d,\.]{2,})',
+    ]
+
+    for url in search_urls:
+        try:
+            html = get_html(url)
+
+            # 1) في HTML الخام
+            for pattern in patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                for m in matches:
+                    value = parse_iqd_value(m)
+                    if value:
+                        return value
+
+            # 2) في النص الظاهر
+            soup = BeautifulSoup(html, "lxml")
+            text = soup.get_text(" ", strip=True)
+
+            for pattern in patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                for m in matches:
+                    value = parse_iqd_value(m)
+                    if value:
+                        return value
+
+        except:
+            continue
+
+    return None
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "بوت تسعيرة مانكو\n\n"
         "الاوامر:\n"
         "/check رابط أو ريفيرانس\n"
-        "/quote سعر_تركيا سعر_العراق رابط_أو_ريفيرانس\n\n"
+        "/quote سعر_تركيا سعر_العراق رابط_أو_ريفيرانس\n"
+        "/iraq ريفيرانس\n\n"
         "مثال:\n"
-        "/quote 2000 74000 27071311"
+        "/iraq 27071311"
     )
 
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,6 +175,34 @@ async def quote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"سعر البيع: {result['sale_price']}"
     )
 
+async def iraq(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("استخدم:\n/iraq 27071311")
+        return
+
+    text = " ".join(context.args).strip()
+    ref_code = extract_ref(text)
+
+    if not ref_code:
+        await update.message.reply_text("لم استطع استخراج الريفيرانس")
+        return
+
+    await update.message.reply_text("جاري البحث في Mango العراق...")
+
+    iraq_price = search_iraq_price_by_ref(ref_code)
+
+    if not iraq_price:
+        await update.message.reply_text(
+            f"الريفيرانس: {ref_code}\n"
+            "لم استطع جلب سعر العراق حالياً"
+        )
+        return
+
+    await update.message.reply_text(
+        f"الريفيرانس: {ref_code}\n"
+        f"سعر Mango العراق: {iraq_price}"
+    )
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -122,6 +210,7 @@ def main():
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("check", check))
     app.add_handler(CommandHandler("quote", quote))
+    app.add_handler(CommandHandler("iraq", iraq))
 
     print("Bot started...")
     app.run_polling()
