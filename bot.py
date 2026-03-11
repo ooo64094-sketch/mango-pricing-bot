@@ -13,11 +13,13 @@ HEADERS = {
 "Accept-Language": "en-US,en;q=0.9,tr;q=0.8,ar;q=0.7",
 }
 
+
 def extract_ref(text: str):
 match = re.search(r'_(\d{8})|\b(\d{8})\b', text)
 if match:
 return match.group(1) or match.group(2)
 return None
+
 
 def serp_search(query: str):
 if not SERPAPI_KEY:
@@ -37,45 +39,56 @@ r.raise_for_status()
 data = r.json()
 return data.get("organic_results", [])
 
+
 def parse_tr_price_text(text: str):
 text = text.strip().replace("\xa0", " ").replace(" ", "")
 text = text.replace("TL", "").replace("₺", "")
+
 if "," in text and "." in text:
 text = text.replace(".", "").replace(",", ".")
 else:
 text = text.replace(",", ".")
+
 try:
 return float(text)
-except:
+except Exception:
 return None
+
 
 def parse_iqd_price_text(text: str):
 text = text.strip().replace("\xa0", " ").replace(" ", "")
 text = text.replace("IQD", "")
 text = text.replace(",", "")
 text = text.split(".")[0]
+
 try:
 return int(text)
-except:
+except Exception:
 return None
+
 
 def turkey_to_iqd(price_try: float):
 return round((price_try / 4300) * 140000)
 
+
 def flexible_base_load(diff: int):
 if diff <= 5000:
 return 0
+
 load = diff * 0.45
 return round(load / 1000) * 1000
 
+
 def round_sale_price(raw_price: int):
 remainder = raw_price % 1000
+
 if remainder == 0:
 return raw_price + 500
 elif remainder <= 499:
 return raw_price + (500 - remainder)
 else:
 return raw_price + (1000 - remainder)
+
 
 def calculate_quote(price_try: float, iraq_price: int):
 cost_iqd = turkey_to_iqd(price_try)
@@ -94,8 +107,9 @@ return {
 "cost_iqd": cost_iqd,
 "diff": diff,
 "total_load": total_load,
-"sale_price": sale_price
+"sale_price": sale_price,
 }
+
 
 async def dismiss_popups(page):
 for txt in ["KABUL ET", "ACCEPT", "Accept", "Continue", "Tamam"]:
@@ -105,14 +119,16 @@ if await loc.count() > 0:
 await loc.click(timeout=2000)
 await page.wait_for_timeout(1500)
 break
-except:
+except Exception:
 pass
+
 
 async def get_body_text(page):
 try:
 return await page.locator("body").text_content() or ""
-except:
+except Exception:
 return ""
+
 
 async def collect_visible_turkey_prices(page):
 selectors = [
@@ -126,30 +142,36 @@ for sel in selectors:
 try:
 loc = page.locator(sel)
 count = await loc.count()
+
 for i in range(min(count, 20)):
 txt = await loc.nth(i).text_content()
 if not txt:
 continue
+
 value = parse_tr_price_text(txt)
 if value and 10 <= value <= 100000:
 candidates.append(value)
-except:
+except Exception:
 pass
 
 return candidates
 
+
 async def extract_visible_turkey_price(page):
 candidates = await collect_visible_turkey_prices(page)
+
 if candidates:
-# نأخذ أصغر سعر منطقي ظاهر، لأنه غالبًا السعر الرئيسي وليس أسعار أخرى كبيرة
 return min(candidates)
 
 body_text = await get_body_text(page)
+
 patterns = [
 r'([0-9][0-9\.,]*)\s*TL',
 r'([0-9][0-9\.,]*)\s*₺',
 ]
+
 fallback = []
+
 for pattern in patterns:
 matches = re.findall(pattern, body_text, re.IGNORECASE)
 for m in matches:
@@ -162,6 +184,7 @@ return min(fallback)
 
 return None
 
+
 async def get_h1_y(page):
 try:
 h1 = page.locator("h1").first
@@ -169,9 +192,11 @@ if await h1.count() > 0:
 box = await h1.bounding_box()
 if box:
 return box["y"]
-except:
+except Exception:
 pass
+
 return None
+
 
 async def collect_visible_iqd_prices(page):
 selectors = [
@@ -186,6 +211,7 @@ for sel in selectors:
 try:
 loc = page.locator(sel)
 count = await loc.count()
+
 for i in range(min(count, 20)):
 item = loc.nth(i)
 txt = await item.text_content()
@@ -198,18 +224,20 @@ continue
 
 box = await item.bounding_box()
 distance = 999999.0
+
 if box and h1_y is not None:
 distance = abs(box["y"] - h1_y)
 
 candidates.append({
 "text": txt.strip(),
 "value": value,
-"distance": distance
+"distance": distance,
 })
-except:
+except Exception:
 pass
 
 return candidates
+
 
 async def extract_visible_iqd_price(page):
 candidates = await collect_visible_iqd_prices(page)
@@ -227,14 +255,16 @@ return None
 
 return best["value"]
 
+
 async def scrape_product_page(url: str, locale: str, mode: str):
 async with async_playwright() as p:
 browser = await p.chromium.launch(headless=True)
 context = await browser.new_context(
 locale=locale,
-user_agent=HEADERS["User-Agent"]
+user_agent=HEADERS["User-Agent"],
 )
 page = await context.new_page()
+
 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 await page.wait_for_timeout(3500)
 await dismiss_popups(page)
@@ -248,10 +278,12 @@ else:
 price = await extract_visible_iqd_price(page)
 
 await browser.close()
+
 return {
 "ref": ref_code,
-"price": price
+"price": price,
 }
+
 
 def find_turkey_links(ref_code: str, original_url: str = None):
 links = []
@@ -274,10 +306,11 @@ link = res.get("link", "")
 if "shop.mango.com/tr/" in link and link not in seen:
 seen.add(link)
 links.append(link)
-except:
+except Exception:
 pass
 
 return links
+
 
 def find_iraq_links(ref_code: str):
 queries = [
@@ -297,10 +330,11 @@ link = res.get("link", "")
 if "shop.mango.com/iq/" in link and link not in seen:
 seen.add(link)
 links.append(link)
-except:
+except Exception:
 pass
 
 return links
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 await update.message.reply_text(
@@ -309,8 +343,10 @@ await update.message.reply_text(
 "/check رابط_تركيا أو ريفيرانس"
 )
 
+
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 await update.message.reply_text("pong")
+
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if not context.args:
@@ -327,7 +363,11 @@ return
 await update.message.reply_text("جاري الفحص...")
 
 try:
-turkey_links = find_turkey_links(ref_code, user_input if user_input.startswith("http") else None)
+turkey_links = find_turkey_links(
+ref_code,
+user_input if user_input.startswith("http") else None
+)
+
 if not turkey_links:
 await update.message.reply_text(
 f"الريفيرانس: {ref_code}\n"
@@ -336,13 +376,14 @@ f"الريفيرانس: {ref_code}\n"
 return
 
 turkey_data = None
+
 for link in turkey_links[:5]:
 try:
 data = await scrape_product_page(link, "tr-TR", "TR")
 if data["ref"] == ref_code and data["price"]:
 turkey_data = data
 break
-except:
+except Exception:
 continue
 
 if not turkey_data:
@@ -361,10 +402,10 @@ data = await scrape_product_page(link, "en-US", "IQ")
 if data["ref"] == ref_code and data["price"]:
 iraq_data = {
 "url": link,
-"price_iqd": data["price"]
+"price_iqd": data["price"],
 }
 break
-except:
+except Exception:
 continue
 
 if not iraq_data:
@@ -392,6 +433,7 @@ f"سعر البيع: {result['sale_price']}"
 except Exception as e:
 await update.message.reply_text(f"خطأ:\n{str(e)}")
 
+
 def main():
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
@@ -400,5 +442,6 @@ app.add_handler(CommandHandler("check", check))
 
 print("Bot started...")
 app.run_polling()
+
 
 main()
