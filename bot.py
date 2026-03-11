@@ -9,7 +9,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9,tr;q=0.8,ar;q=0.7",
     "Connection": "keep-alive",
@@ -32,7 +32,6 @@ def get_html(url: str):
         "selectedCountry": "IQ",
         "selectedLanguage": "en",
     }
-
     r = session.get(url, cookies=cookies, timeout=25, allow_redirects=True)
     r.raise_for_status()
     return r.text
@@ -48,21 +47,13 @@ def serp_search(query: str):
         "api_key": SERPAPI_KEY,
         "hl": "en",
         "gl": "us",
+        "num": 10,
     }
 
     r = requests.get("https://serpapi.com/search", params=params, timeout=25)
     r.raise_for_status()
     data = r.json()
     return data.get("organic_results", [])
-
-
-def parse_int_number(raw: str):
-    raw = raw.strip().replace("\xa0", " ").replace(" ", "")
-    raw = raw.replace(",", "").replace(".", "")
-    try:
-        return int(raw)
-    except:
-        return None
 
 
 def parse_tr_price(raw: str):
@@ -81,68 +72,77 @@ def parse_tr_price(raw: str):
 
 
 def extract_turkey_price(html: str):
+    # 1) HTML raw
     patterns = [
         r'(\d[\d\.,]{1,})\s*TL',
         r'(\d[\d\.,]{1,})\s*₺',
-        r'"price"\s*:\s*"?(\\?\d[\d\.,]{0,})"?',
         r'"salePrice"\s*:\s*"?(\\?\d[\d\.,]{0,})"?',
+        r'"price"\s*:\s*"?(\\?\d[\d\.,]{0,})"?',
     ]
 
     for pattern in patterns:
         matches = re.findall(pattern, html, re.IGNORECASE)
         for m in matches:
             value = parse_tr_price(m)
-            if value and value > 0:
+            if value and 10 <= value <= 100000:
                 return value
 
+    # 2) Visible text
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
 
-    for pattern in patterns[:2]:
+    text_patterns = [
+        r'(\d[\d\.,]{1,})\s*TL',
+        r'(\d[\d\.,]{1,})\s*₺',
+    ]
+
+    for pattern in text_patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
             value = parse_tr_price(m)
-            if value and value > 0:
+            if value and 10 <= value <= 100000:
                 return value
 
     return None
 
 
 def extract_iqd_price(html: str):
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text(" ", strip=True)
+
+    # نقرأ فقط السعر الظاهر المرتبط بـ IQD
     patterns = [
-        r'IQD\s*([0-9][0-9,\.]*)',
-        r'([0-9][0-9,\.]*)\s*IQD',
-        r'"price"\s*:\s*"?([0-9][0-9,\.]*)"?',
-        r'"salePrice"\s*:\s*"?([0-9][0-9,\.]*)"?',
-        r'"value"\s*:\s*"?([0-9][0-9,\.]*)"?\s*,\s*"currency"\s*:\s*"IQD"',
+        r'IQD\s*([0-9,]+\.\d{2}|[0-9,]+)',
+        r'([0-9,]+\.\d{2}|[0-9,]+)\s*IQD',
     ]
 
     for pattern in patterns:
-        matches = re.findall(pattern, html, re.IGNORECASE)
+        matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
-            raw = str(m).replace(",", "").replace(".00", "").replace(".", "")
+            raw = str(m).replace(",", "")
+            raw = raw.split(".")[0]
             try:
                 value = int(raw)
-                if value > 1000:
+                if 5000 <= value <= 2000000:
                     return value
             except:
                 pass
 
-    soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text(" ", strip=True)
-
-    text_patterns = [
-        r'IQD\s*([0-9][0-9,\.]*)',
-        r'([0-9][0-9,\.]*)\s*IQD',
+    # fallback محدود من HTML الخام إذا النص الظاهر فشل
+    html_patterns = [
+        r'"currency"\s*:\s*"IQD".{0,120}?"value"\s*:\s*"?(\\?[0-9,\.]+)"?',
+        r'"value"\s*:\s*"?(\\?[0-9,\.]+)"?.{0,120}?"currency"\s*:\s*"IQD"',
     ]
 
-    for pattern in text_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+    for pattern in html_patterns:
+        matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
         for m in matches:
-            raw = str(m).replace(",", "").replace(".00", "").replace(".", "")
+            raw = str(m).replace(",", "")
+            raw = raw.split(".")[0]
+            raw = raw.replace("\\", "")
             try:
                 value = int(raw)
-                if value > 1000:
+                if 5000 <= value <= 2000000:
                     return value
             except:
                 pass
@@ -183,7 +183,10 @@ def find_turkey_page_and_price(ref_code: str, original_url: str = None):
             html = get_html(link)
             price = extract_turkey_price(html)
             if price:
-                return {"url": link, "price_try": price}
+                return {
+                    "url": link,
+                    "price_try": price
+                }
         except:
             continue
 
@@ -221,7 +224,10 @@ def find_iraq_page_and_price(ref_code: str):
             html = get_html(link)
             price = extract_iqd_price(html)
             if price:
-                return {"url": link, "price_iqd": price}
+                return {
+                    "url": link,
+                    "price_iqd": price
+                }
         except:
             continue
 
@@ -235,12 +241,14 @@ def turkey_to_iqd(price_try: float):
 def flexible_base_load(diff: int):
     if diff <= 5000:
         return 0
+
     load = diff * 0.45
     return round(load / 1000) * 1000
 
 
 def round_sale_price(raw_price: int):
     remainder = raw_price % 1000
+
     if remainder == 0:
         return raw_price + 500
     elif remainder <= 499:
