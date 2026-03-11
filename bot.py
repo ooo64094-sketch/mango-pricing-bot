@@ -6,31 +6,20 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 TOKEN = os.environ.get("BOT_TOKEN")
 
 def extract_ref(text):
-    patterns = [
-        r'_(\d{8})',
-        r'\b(\d{8})\b'
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-
+    match = re.search(r'_(\d{8})|\b(\d{8})\b', text)
+    if match:
+        return match.group(1) or match.group(2)
     return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "بوت تسعيرة مانكو\n"
-        "استخدم:\n"
-        "/check رابط أو ريفيرانس"
-    )
+    await update.message.reply_text("start ok")
 
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("pong")
+    await update.message.reply_text("ping ok")
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("ارسل الرابط أو الريفيرانس بعد /check")
+        await update.message.reply_text("اكتب /check ثم الريفيرانس أو الرابط")
         return
 
     text = " ".join(context.args).strip()
