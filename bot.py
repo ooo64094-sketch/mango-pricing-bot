@@ -58,7 +58,6 @@ def parse_tr_price(raw: str):
     raw = raw.strip().replace("\xa0", " ").replace(" ", "")
     raw = raw.replace("TL", "").replace("₺", "")
 
-    # 1.999,99 => 1999.99
     if "," in raw and "." in raw:
         raw = raw.replace(".", "").replace(",", ".")
     else:
@@ -121,16 +120,6 @@ def extract_iqd_price(html: str):
 
     return None
 
-def extract_title(html: str):
-    try:
-        soup = BeautifulSoup(html, "lxml")
-        title = soup.title.get_text(" ", strip=True) if soup.title else None
-        if title:
-            return title
-    except:
-        pass
-    return None
-
 def find_turkey_page_and_price(ref_code: str, original_url: str = None):
     candidates = []
 
@@ -138,8 +127,8 @@ def find_turkey_page_and_price(ref_code: str, original_url: str = None):
         candidates.append(original_url)
 
     queries = [
-        f"site:shop.mango.com/tr/tr {ref_code} Mango",
-        f"site:shop.mango.com/tr/tr/p {ref_code}",
+        f'site:shop.mango.com/tr/tr "{ref_code}"',
+        f"site:shop.mango.com/tr/tr/p {ref_code} Mango",
     ]
 
     for q in queries:
@@ -163,13 +152,8 @@ def find_turkey_page_and_price(ref_code: str, original_url: str = None):
         try:
             html = get_html(link)
             price = extract_turkey_price(html)
-            title = extract_title(html)
             if price:
-                return {
-                    "url": link,
-                    "price_try": price,
-                    "title": title,
-                }
+                return {"url": link, "price_try": price}
         except:
             continue
 
@@ -177,8 +161,9 @@ def find_turkey_page_and_price(ref_code: str, original_url: str = None):
 
 def find_iraq_page_and_price(ref_code: str):
     queries = [
-        f"site:shop.mango.com/iq/en {ref_code} Mango",
-        f"site:shop.mango.com/iq/en/p {ref_code}",
+        f'site:shop.mango.com/iq/en/p "{ref_code}"',
+        f'site:shop.mango.com/iq/en "{ref_code}" "IQD"',
+        f"site:shop.mango.com/iq/en/p {ref_code} Mango",
     ]
 
     candidates = []
@@ -200,17 +185,12 @@ def find_iraq_page_and_price(ref_code: str):
             seen.add(c)
             unique_candidates.append(c)
 
-    for link in unique_candidates[:8]:
+    for link in unique_candidates[:10]:
         try:
             html = get_html(link)
             price = extract_iqd_price(html)
-            title = extract_title(html)
             if price:
-                return {
-                    "url": link,
-                    "price_iqd": price,
-                    "title": title,
-                }
+                return {"url": link, "price_iqd": price}
         except:
             continue
 
@@ -227,7 +207,6 @@ def flexible_base_load(diff: int):
 
 def round_sale_price(raw_price: int):
     remainder = raw_price % 1000
-
     if remainder == 0:
         return raw_price + 500
     elif remainder <= 499:
@@ -259,10 +238,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "بوت تسعيرة مانكو\n\n"
         "استخدم:\n"
-        "/check رابط_تركيا أو ريفيرانس\n\n"
-        "مثال:\n"
-        "/check https://shop.mango.com/tr/tr/p/...\n"
-        "/check 27071311"
+        "/check رابط_تركيا أو ريفيرانس"
     )
 
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -283,7 +259,10 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("جاري الفحص...")
 
     try:
-        turkey_data = find_turkey_page_and_price(ref_code, user_input if user_input.startswith("http") else None)
+        turkey_data = find_turkey_page_and_price(
+            ref_code,
+            user_input if user_input.startswith("http") else None
+        )
 
         if not turkey_data:
             await update.message.reply_text(
