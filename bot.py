@@ -12,14 +12,17 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9,tr;q=0.8,ar;q=0.7",
 }
 
+
 def extract_ref(text):
     match = re.search(r'_(\d{8})|\b(\d{8})\b', text)
     if match:
         return match.group(1) or match.group(2)
     return None
 
+
 def turkey_to_iqd(price_try):
     return round((price_try / 4300) * 140000)
+
 
 def flexible_base_load(diff):
     if diff <= 5000:
@@ -27,6 +30,7 @@ def flexible_base_load(diff):
 
     load = diff * 0.45
     return round(load / 1000) * 1000
+
 
 def round_sale_price(raw_price):
     remainder = raw_price % 1000
@@ -37,6 +41,7 @@ def round_sale_price(raw_price):
         return raw_price + (500 - remainder)
     else:
         return raw_price + (1000 - remainder)
+
 
 def calculate_quote(price_try, iraq_price):
     cost_iqd = turkey_to_iqd(price_try)
@@ -59,10 +64,12 @@ def calculate_quote(price_try, iraq_price):
         "sale_price": sale_price
     }
 
+
 def get_html(url):
     response = requests.get(url, headers=HEADERS, timeout=25)
     response.raise_for_status()
     return response.text
+
 
 def parse_iqd_value(raw):
     raw = raw.strip()
@@ -71,6 +78,7 @@ def parse_iqd_value(raw):
         return int(raw)
     except:
         return None
+
 
 def search_iraq_price_by_ref(ref_code):
     search_urls = [
@@ -87,7 +95,7 @@ def search_iraq_price_by_ref(ref_code):
         try:
             html = get_html(url)
 
-            # 1) في HTML الخام
+            # 1) البحث في HTML الخام
             for pattern in patterns:
                 matches = re.findall(pattern, html, re.IGNORECASE)
                 for m in matches:
@@ -95,7 +103,7 @@ def search_iraq_price_by_ref(ref_code):
                     if value:
                         return value
 
-            # 2) في النص الظاهر
+            # 2) البحث في النص الظاهر
             soup = BeautifulSoup(html, "lxml")
             text = soup.get_text(" ", strip=True)
 
@@ -111,6 +119,7 @@ def search_iraq_price_by_ref(ref_code):
 
     return None
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "بوت تسعيرة مانكو\n\n"
@@ -122,8 +131,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/iraq 27071311"
     )
 
+
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("pong")
+
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -138,6 +149,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(f"الريفيرانس المستخرج:\n{ref_code}")
+
 
 async def quote(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
@@ -175,6 +187,7 @@ async def quote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"سعر البيع: {result['sale_price']}"
     )
 
+
 async def iraq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("استخدم:\n/iraq 27071311")
@@ -203,6 +216,7 @@ async def iraq(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"سعر Mango العراق: {iraq_price}"
     )
 
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -214,5 +228,6 @@ def main():
 
     print("Bot started...")
     app.run_polling()
+
 
 main()
