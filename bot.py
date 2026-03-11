@@ -96,6 +96,22 @@ def extract_turkey_price(html: str):
     return None
 
 def extract_iqd_price(html: str):
+    json_patterns = [
+        r'"price"\s*:\s*"?(\d+)"?',
+        r'"salePrice"\s*:\s*"?(\d+)"?',
+        r'"value"\s*:\s*"?(\d+)"?\s*,\s*"currency"\s*:\s*"IQD"'
+    ]
+
+    for pattern in json_patterns:
+        matches = re.findall(pattern, html)
+        for m in matches:
+            try:
+                value = int(m)
+                if value > 1000:
+                    return value
+            except:
+                pass
+
     patterns = [
         r'(\d[\d,\.]{1,})\s*IQD',
         r'IQD\s*(\d[\d,\.]{1,})',
