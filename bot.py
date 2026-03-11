@@ -13,10 +13,12 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9,tr;q=0.8,ar;q=0.7",
     "Connection": "keep-alive",
+    "Referer": "https://shop.mango.com/",
 }
 
 session = requests.Session()
 session.headers.update(HEADERS)
+
 
 def extract_ref(text: str):
     match = re.search(r'_(\d{8})|\b(\d{8})\b', text)
@@ -24,10 +26,17 @@ def extract_ref(text: str):
         return match.group(1) or match.group(2)
     return None
 
+
 def get_html(url: str):
-    r = session.get(url, timeout=25, allow_redirects=True)
+    cookies = {
+        "selectedCountry": "IQ",
+        "selectedLanguage": "en",
+    }
+
+    r = session.get(url, cookies=cookies, timeout=25, allow_redirects=True)
     r.raise_for_status()
     return r.text
+
 
 def serp_search(query: str):
     if not SERPAPI_KEY:
@@ -46,6 +55,7 @@ def serp_search(query: str):
     data = r.json()
     return data.get("organic_results", [])
 
+
 def parse_int_number(raw: str):
     raw = raw.strip().replace("\xa0", " ").replace(" ", "")
     raw = raw.replace(",", "").replace(".", "")
@@ -53,6 +63,7 @@ def parse_int_number(raw: str):
         return int(raw)
     except:
         return None
+
 
 def parse_tr_price(raw: str):
     raw = raw.strip().replace("\xa0", " ").replace(" ", "")
@@ -67,6 +78,7 @@ def parse_tr_price(raw: str):
         return float(raw)
     except:
         return None
+
 
 def extract_turkey_price(html: str):
     patterns = [
@@ -95,46 +107,48 @@ def extract_turkey_price(html: str):
 
     return None
 
+
 def extract_iqd_price(html: str):
-    json_patterns = [
-        r'"price"\s*:\s*"?(\d+)"?',
-        r'"salePrice"\s*:\s*"?(\d+)"?',
-        r'"value"\s*:\s*"?(\d+)"?\s*,\s*"currency"\s*:\s*"IQD"'
-    ]
-
-    for pattern in json_patterns:
-        matches = re.findall(pattern, html)
-        for m in matches:
-            try:
-                value = int(m)
-                if value > 1000:
-                    return value
-            except:
-                pass
-
     patterns = [
-        r'(\d[\d,\.]{1,})\s*IQD',
-        r'IQD\s*(\d[\d,\.]{1,})',
+        r'IQD\s*([0-9][0-9,\.]*)',
+        r'([0-9][0-9,\.]*)\s*IQD',
+        r'"price"\s*:\s*"?([0-9][0-9,\.]*)"?',
+        r'"salePrice"\s*:\s*"?([0-9][0-9,\.]*)"?',
+        r'"value"\s*:\s*"?([0-9][0-9,\.]*)"?\s*,\s*"currency"\s*:\s*"IQD"',
     ]
 
     for pattern in patterns:
         matches = re.findall(pattern, html, re.IGNORECASE)
         for m in matches:
-            value = parse_int_number(m)
-            if value and value > 0:
-                return value
+            raw = str(m).replace(",", "").replace(".00", "").replace(".", "")
+            try:
+                value = int(raw)
+                if value > 1000:
+                    return value
+            except:
+                pass
 
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
 
-    for pattern in patterns:
+    text_patterns = [
+        r'IQD\s*([0-9][0-9,\.]*)',
+        r'([0-9][0-9,\.]*)\s*IQD',
+    ]
+
+    for pattern in text_patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
-            value = parse_int_number(m)
-            if value and value > 0:
-                return value
+            raw = str(m).replace(",", "").replace(".00", "").replace(".", "")
+            try:
+                value = int(raw)
+                if value > 1000:
+                    return value
+            except:
+                pass
 
     return None
+
 
 def find_turkey_page_and_price(ref_code: str, original_url: str = None):
     candidates = []
@@ -175,6 +189,7 @@ def find_turkey_page_and_price(ref_code: str, original_url: str = None):
 
     return None
 
+
 def find_iraq_page_and_price(ref_code: str):
     queries = [
         f'site:shop.mango.com/iq/en/p "{ref_code}"',
@@ -212,14 +227,17 @@ def find_iraq_page_and_price(ref_code: str):
 
     return None
 
+
 def turkey_to_iqd(price_try: float):
     return round((price_try / 4300) * 140000)
+
 
 def flexible_base_load(diff: int):
     if diff <= 5000:
         return 0
     load = diff * 0.45
     return round(load / 1000) * 1000
+
 
 def round_sale_price(raw_price: int):
     remainder = raw_price % 1000
@@ -229,6 +247,7 @@ def round_sale_price(raw_price: int):
         return raw_price + (500 - remainder)
     else:
         return raw_price + (1000 - remainder)
+
 
 def calculate_quote(price_try: float, iraq_price: int):
     cost_iqd = turkey_to_iqd(price_try)
@@ -250,6 +269,7 @@ def calculate_quote(price_try: float, iraq_price: int):
         "sale_price": sale_price
     }
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "بوت تسعيرة مانكو\n\n"
@@ -257,8 +277,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/check رابط_تركيا أو ريفيرانس"
     )
 
+
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("pong")
+
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -314,6 +336,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"خطأ:\n{str(e)}")
 
+
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
@@ -322,5 +345,6 @@ def main():
 
     print("Bot started...")
     app.run_polling()
+
 
 main()
